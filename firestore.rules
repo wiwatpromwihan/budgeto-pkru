@@ -1,0 +1,46 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Assumed model: users/{uid}/months/{YYYY-MM} has exactly needs, wants,
+    // savings as integer percentages. Its entries/{id} documents have exactly
+    // kind (income|needs|wants|savings), amountSatang (positive integer),
+    // date (YYYY-MM-DD within parent month), and note (string up to 120 chars).
+    // No user profile document or public data exists.
+    function isAuthenticated() { return request.auth != null; }
+    function isOwner(uid) { return isAuthenticated() && request.auth.uid == uid; }
+    function uidUnchanged(uid) { return request.auth.uid == uid; }
+    function uidNotModified(uid) { return request.auth.uid == uid; }
+    function validMonthId(monthId) { return monthId.matches('^[0-9]{4}-(0[1-9]|1[0-2])$'); }
+    function isValidMonth(data) {
+      return data.keys().hasAll(['needs', 'wants', 'savings'])
+        && data.keys().hasOnly(['needs', 'wants', 'savings'])
+        && data.needs is int && data.wants is int && data.savings is int
+        && data.needs >= 0 && data.needs <= 100
+        && data.wants >= 0 && data.wants <= 100
+        && data.savings >= 0 && data.savings <= 100
+        && data.needs + data.wants + data.savings == 100;
+    }
+    function isValidEntry(data, monthId) {
+      return data.keys().hasAll(['kind', 'amountSatang', 'date', 'note'])
+        && data.keys().hasOnly(['kind', 'amountSatang', 'date', 'note'])
+        && data.kind is string && data.kind in ['income', 'needs', 'wants', 'savings']
+        && data.amountSatang is int && data.amountSatang > 0 && data.amountSatang <= 100000000000
+        && data.date is string && data.date.size() == 10
+        && data.date.matches('^' + monthId + '-(0[1-9]|[12][0-9]|3[01])$')
+        && data.note is string && data.note.size() <= 120;
+    }
+    match /users/{uid}/months/{monthId} {
+      allow get, list: if isOwner(uid) && validMonthId(monthId);
+      allow create: if isOwner(uid) && uidUnchanged(uid) && validMonthId(monthId) && isValidMonth(request.resource.data);
+      allow update: if isOwner(uid) && uidNotModified(uid) && validMonthId(monthId) && isValidMonth(request.resource.data);
+      allow delete: if false;
+      match /entries/{entryId} {
+        allow get, list: if isOwner(uid) && validMonthId(monthId);
+        allow create: if isOwner(uid) && uidUnchanged(uid) && validMonthId(monthId) && isValidEntry(request.resource.data, monthId);
+        allow update: if isOwner(uid) && uidNotModified(uid) && validMonthId(monthId) && isValidEntry(request.resource.data, monthId);
+        allow delete: if isOwner(uid) && validMonthId(monthId);
+      }
+    }
+    match /{document=**} { allow read, write: if false; }
+  }
+}
