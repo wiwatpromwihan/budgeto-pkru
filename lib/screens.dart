@@ -218,9 +218,33 @@ class DashboardScreen extends StatefulWidget {
 class _DashboardScreenState extends State<DashboardScreen> {
   DateTime _month = DateTime(DateTime.now().year, DateTime.now().month);
   bool _goldTab = false;
+  late Stream<BudgetSplit> _splitStream;
+  late Stream<List<BudgetEntry>> _entriesStream;
 
-  void _changeMonth(int offset) =>
-      setState(() => _month = DateTime(_month.year, _month.month + offset));
+  @override
+  void initState() {
+    super.initState();
+    _bindMonthStreams();
+  }
+
+  @override
+  void didUpdateWidget(covariant DashboardScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.store != widget.store ||
+        oldWidget.user.uid != widget.user.uid) {
+      _bindMonthStreams();
+    }
+  }
+
+  void _bindMonthStreams() {
+    _splitStream = widget.store.split(widget.user.uid, _month);
+    _entriesStream = widget.store.entries(widget.user.uid, _month);
+  }
+
+  void _changeMonth(int offset) => setState(() {
+    _month = DateTime(_month.year, _month.month + offset);
+    _bindMonthStreams();
+  });
   String get _monthName => DateFormat('MMMM yyyy', 'th_TH').format(_month);
 
   Future<void> _entry([BudgetEntry? existing]) async {
@@ -372,10 +396,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     ? GoldScreen(uid: widget.user.uid, store: widget.store)
                     : StreamBuilder<BudgetSplit>(
                         key: ValueKey('split-${monthKey(_month)}'),
-                        stream: widget.store.split(widget.user.uid, _month),
+                        stream: _splitStream,
                         builder: (context, splitSnapshot) => StreamBuilder<List<BudgetEntry>>(
                           key: ValueKey('entries-${monthKey(_month)}'),
-                          stream: widget.store.entries(widget.user.uid, _month),
+                          stream: _entriesStream,
                           builder: (context, entrySnapshot) {
                             if (splitSnapshot.hasError ||
                                 entrySnapshot.hasError) {

@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:budgeto/refreshable_stream.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -162,6 +165,8 @@ int nextCashBalance(
 }
 
 class BudgetStore {
+  final StreamController<String> _refresh =
+      StreamController<String>.broadcast();
   final FirebaseFirestore _db = FirebaseFirestore.instanceFor(
     app: Firebase.app(),
     databaseId: 'budgeto',
@@ -180,16 +185,36 @@ class BudgetStore {
   CollectionReference<Map<String, dynamic>> _gold(String uid) =>
       _db.collection('users').doc(uid).collection('goldPurchases');
 
-  Stream<int> cash(String uid) => _cash(
-    uid,
-  ).snapshots().map((doc) => (doc.data()?['cashSatang'] as int?) ?? 0);
+  Stream<void> _changes(String key) =>
+      _refresh.stream.where((changed) => changed == key).map((_) {});
 
-  Stream<List<GoldPurchase>> goldPurchases(String uid) =>
-      _gold(uid).snapshots().map((snapshot) {
-        final result = snapshot.docs.map(GoldPurchase.fromDoc).toList();
-        result.sort((a, b) => b.date.compareTo(a.date));
-        return result;
-      });
+  void _changed(String key) => _refresh.add(key);
+
+  Stream<int> cash(String uid) {
+    final ref = _cash(uid);
+    int parse(DocumentSnapshot<Map<String, dynamic>> doc) =>
+        (doc.data()?['cashSatang'] as int?) ?? 0;
+    return watchWithRefresh(
+      ref.snapshots().map(parse),
+      _changes('cash:$uid'),
+      () async => parse(await ref.get(const GetOptions(source: Source.server))),
+    );
+  }
+
+  Stream<List<GoldPurchase>> goldPurchases(String uid) {
+    final ref = _gold(uid);
+    List<GoldPurchase> parse(QuerySnapshot<Map<String, dynamic>> snapshot) {
+      final result = snapshot.docs.map(GoldPurchase.fromDoc).toList();
+      result.sort((a, b) => b.date.compareTo(a.date));
+      return result;
+    }
+
+    return watchWithRefresh(
+      ref.snapshots().map(parse),
+      _changes('gold:$uid'),
+      () async => parse(await ref.get(const GetOptions(source: Source.server))),
+    );
+  }
 
   Future<void> ensureCash(String uid) async {
     if ((await _cash(uid).get()).exists) return;
@@ -214,22 +239,39 @@ class BudgetStore {
     });
   }
 
-  Stream<BudgetSplit> split(String uid, DateTime month) =>
-      _month(uid, month).snapshots().map(BudgetSplit.fromDoc);
+  Stream<BudgetSplit> split(String uid, DateTime month) {
+    final ref = _month(uid, month);
+    return watchWithRefresh(
+      ref.snapshots().map(BudgetSplit.fromDoc),
+      _changes('split:$uid:${monthKey(month)}'),
+      () async => BudgetSplit.fromDoc(
+        await ref.get(const GetOptions(source: Source.server)),
+      ),
+    );
+  }
 
-  Stream<List<BudgetEntry>> entries(String uid, DateTime month) =>
-      _month(uid, month).collection('entries').snapshots().map((snapshot) {
-        final result = snapshot.docs.map(BudgetEntry.fromDoc).toList();
-        result.sort((a, b) {
-          final byDate = b.date.compareTo(a.date);
-          return byDate != 0 ? byDate : b.id.compareTo(a.id);
-        });
-        return result;
+  Stream<List<BudgetEntry>> entries(String uid, DateTime month) {
+    final ref = _month(uid, month).collection('entries');
+    List<BudgetEntry> parse(QuerySnapshot<Map<String, dynamic>> snapshot) {
+      final result = snapshot.docs.map(BudgetEntry.fromDoc).toList();
+      result.sort((a, b) {
+        final byDate = b.date.compareTo(a.date);
+        return byDate != 0 ? byDate : b.id.compareTo(a.id);
       });
+      return result;
+    }
+
+    return watchWithRefresh(
+      ref.snapshots().map(parse),
+      _changes('entries:$uid:${monthKey(month)}'),
+      () async => parse(await ref.get(const GetOptions(source: Source.server))),
+    );
+  }
 
   Future<void> saveSplit(String uid, DateTime month, BudgetSplit split) async {
     if (!split.isValid) throw ArgumentError('สัดส่วนต้องรวมกันเป็น 100%');
     await _month(uid, month).set(split.toMap());
+    _changed('split:$uid:${monthKey(month)}');
   }
 
   Future<void> saveEntry(String uid, DateTime month, BudgetEntry entry) async {
@@ -260,6 +302,8 @@ class BudgetStore {
       tx.set(ref, entry.toMap());
       if (oldSavings != newSavings) tx.set(_cash(uid), {'cashSatang': balance});
     });
+    _changed('entries:$uid:${monthKey(month)}');
+    _changed('cash:$uid');
   }
 
   Future<void> deleteEntry(String uid, DateTime month, String id) async {
@@ -279,6 +323,8 @@ class BudgetStore {
       tx.delete(ref);
       if (savings > 0) tx.set(_cash(uid), {'cashSatang': balance});
     });
+    _changed('entries:$uid:${monthKey(month)}');
+    _changed('cash:$uid');
   }
 
   Future<void> saveGold(String uid, GoldPurchase purchase) async {
@@ -306,6 +352,8 @@ class BudgetStore {
       tx.set(ref, purchase.toMap());
       tx.set(_cash(uid), {'cashSatang': balance});
     });
+    _changed('gold:$uid');
+    _changed('cash:$uid');
   }
 
   Future<void> deleteGold(String uid, String id) async {
@@ -322,6 +370,8 @@ class BudgetStore {
         ),
       });
     });
+    _changed('gold:$uid');
+    _changed('cash:$uid');
   }
 }
 

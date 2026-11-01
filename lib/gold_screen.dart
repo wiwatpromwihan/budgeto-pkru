@@ -19,6 +19,8 @@ class _GoldScreenState extends State<GoldScreen> {
   static final GoldHistoryApi _sharedHistoryApi = GoldHistoryApi();
   final api = _sharedApi;
   final historyApi = _sharedHistoryApi;
+  late Stream<int> _cashStream;
+  late Stream<List<GoldPurchase>> _goldStream;
   GoldPrice? price;
   List<DailyGoldPrice>? history;
   bool historyLoading = false;
@@ -29,8 +31,22 @@ class _GoldScreenState extends State<GoldScreen> {
   @override
   void initState() {
     super.initState();
+    _bindStreams();
     _load();
     _loadHistory();
+  }
+
+  @override
+  void didUpdateWidget(covariant GoldScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.store != widget.store || oldWidget.uid != widget.uid) {
+      _bindStreams();
+    }
+  }
+
+  void _bindStreams() {
+    _cashStream = widget.store.cash(widget.uid);
+    _goldStream = widget.store.goldPurchases(widget.uid);
   }
 
   Future<void> _loadHistory() async {
@@ -122,9 +138,9 @@ class _GoldScreenState extends State<GoldScreen> {
 
   @override
   Widget build(BuildContext context) => StreamBuilder<int>(
-    stream: widget.store.cash(widget.uid),
+    stream: _cashStream,
     builder: (context, cashSnapshot) => StreamBuilder<List<GoldPurchase>>(
-      stream: widget.store.goldPurchases(widget.uid),
+      stream: _goldStream,
       builder: (context, snapshot) {
         if (snapshot.hasError || cashSnapshot.hasError) {
           return const Center(child: Text('โหลดข้อมูลออมทองไม่สำเร็จ'));
