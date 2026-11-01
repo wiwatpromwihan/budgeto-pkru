@@ -282,7 +282,7 @@ class BudgetStore {
   }
 
   Future<void> saveGold(String uid, GoldPurchase purchase) async {
-    if (purchase.weightUnits <= 0 ||
+    if (purchase.gramsUnits <= 0 ||
         purchase.costSatang <= 0 ||
         purchase.note.length > 120) {
       throw ArgumentError('ข้อมูลทองไม่ถูกต้อง');
@@ -328,38 +328,56 @@ class BudgetStore {
 class GoldPurchase {
   const GoldPurchase({
     required this.id,
-    required this.weightUnits,
+    required this.gramsUnits,
     required this.costSatang,
     required this.date,
     required this.note,
+    this.referenceSellSatang,
+    this.referenceDate = '',
+    this.referenceTime = '',
   });
   final String id;
-  final int weightUnits;
+  final int gramsUnits;
   final int costSatang;
   final String date;
   final String note;
+  final int? referenceSellSatang;
+  final String referenceDate;
+  final String referenceTime;
 
   factory GoldPurchase.fromDoc(
     QueryDocumentSnapshot<Map<String, dynamic>> doc,
   ) {
     final data = doc.data();
+    final legacyWeightUnits = data['weightUnits'] as int?;
     return GoldPurchase(
       id: doc.id,
-      weightUnits: data['weightUnits'] as int,
+      gramsUnits:
+          data['gramsUnits'] as int? ??
+          legacyWeightToGramUnits(legacyWeightUnits!),
       costSatang: data['costSatang'] as int,
       date: data['date'] as String,
       note: data['note'] as String,
+      referenceSellSatang: data['referenceSellSatang'] as int?,
+      referenceDate: data['referenceDate'] as String? ?? '',
+      referenceTime: data['referenceTime'] as String? ?? '',
     );
   }
   Map<String, dynamic> toMap() => {
-    'weightUnits': weightUnits,
+    'gramsUnits': gramsUnits,
     'costSatang': costSatang,
     'date': date,
     'note': note.trim(),
+    'referenceSellSatang': referenceSellSatang,
+    'referenceDate': referenceDate,
+    'referenceTime': referenceTime,
   };
 }
 
-int? parseWeightUnits(String input) {
+int legacyWeightToGramUnits(int weightUnits) =>
+    (weightUnits * 15244 + 500) ~/ 1000;
+
+int? parseGramUnits(String input) {
   final value = input.trim();
   if (!RegExp(r'^\d+(\.\d{1,4})?$').hasMatch(value)) return null;
   final parts = value.split('.');

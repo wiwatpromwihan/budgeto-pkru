@@ -1,6 +1,20 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 
+const gramUnitsPerBahtGold = 152440; // 15.244 g × 10,000 units/g.
+
+int gramsForAmount(int amountSatang, int sellSatang) {
+  if (amountSatang <= 0 || sellSatang <= 0) {
+    throw ArgumentError('จำนวนเงินและราคาทองต้องมากกว่า 0');
+  }
+  return (amountSatang * gramUnitsPerBahtGold + sellSatang ~/ 2) ~/ sellSatang;
+}
+
+String formatGrams(int units) {
+  final fraction = (units.abs() % 10000).toString().padLeft(4, '0');
+  return '${units < 0 ? '-' : ''}${units.abs() ~/ 10000}.$fraction';
+}
+
 class GoldPrice {
   const GoldPrice({
     required this.buySatang,
@@ -35,8 +49,9 @@ class GoldPrice {
     );
   }
 
-  int estimateSatang(int weightUnits) =>
-      (weightUnits * buySatang + 5000) ~/ 10000;
+  int estimateSatang(int gramsUnits) =>
+      (gramsUnits * buySatang + gramUnitsPerBahtGold ~/ 2) ~/
+      gramUnitsPerBahtGold;
 }
 
 class GoldPriceApi {
@@ -44,6 +59,10 @@ class GoldPriceApi {
   final http.Client _client;
   GoldPrice? _cached;
   DateTime? _fetchedAt;
+
+  bool get isFresh =>
+      _fetchedAt != null &&
+      DateTime.now().difference(_fetchedAt!) < const Duration(seconds: 60);
 
   Future<GoldPrice> latest({bool force = false}) async {
     if (!force &&

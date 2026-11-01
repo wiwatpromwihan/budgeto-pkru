@@ -45,10 +45,16 @@ class _GoldScreenState extends State<GoldScreen> {
   }
 
   Future<void> _edit([GoldPurchase? purchase]) async {
+    if (purchase == null && !api.isFresh) await _load();
+    if (!mounted) return;
     await showDialog<void>(
       context: context,
-      builder: (_) =>
-          _GoldDialog(uid: widget.uid, store: widget.store, existing: purchase),
+      builder: (_) => _GoldDialog(
+        uid: widget.uid,
+        store: widget.store,
+        existing: purchase,
+        currentPrice: price,
+      ),
     );
   }
 
@@ -94,9 +100,9 @@ class _GoldScreenState extends State<GoldScreen> {
           return const Center(child: CircularProgressIndicator());
         }
         final purchases = snapshot.data!;
-        final weight = purchases.fold<int>(0, (sum, e) => sum + e.weightUnits);
+        final grams = purchases.fold<int>(0, (sum, e) => sum + e.gramsUnits);
         final cost = purchases.fold<int>(0, (sum, e) => sum + e.costSatang);
-        final estimate = price?.estimateSatang(weight);
+        final estimate = price?.estimateSatang(grams);
         return ListView(
           children: [
             Row(
@@ -110,7 +116,7 @@ class _GoldScreenState extends State<GoldScreen> {
                 FilledButton.icon(
                   onPressed: () => _edit(),
                   icon: const Icon(Icons.add),
-                  label: const Text('บันทึกซื้อทอง'),
+                  label: const Text('จดทองที่ซื้อ'),
                 ),
               ],
             ),
@@ -134,7 +140,7 @@ class _GoldScreenState extends State<GoldScreen> {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      'น้ำหนักทองที่ถือ  ${NumberFormat('0.####').format(weight / 10000)} บาททองคำ',
+                      'น้ำหนักทองที่ถือ  ${formatGrams(grams)} กรัม (${NumberFormat('0.####').format(grams / gramUnitsPerBahtGold)} บาททองคำ)',
                     ),
                     Text('ต้นทุนจริง  ${money(cost)}'),
                     if (estimate != null) ...[
@@ -209,10 +215,10 @@ class _GoldScreenState extends State<GoldScreen> {
               Card(
                 child: ListTile(
                   title: Text(
-                    '${NumberFormat('0.####').format(item.weightUnits / 10000)} บาททองคำ · ${money(item.costSatang)}',
+                    '${formatGrams(item.gramsUnits)} กรัม · ${money(item.costSatang)}',
                   ),
                   subtitle: Text(
-                    '${item.date}${item.note.isEmpty ? '' : ' · ${item.note}'}',
+                    '${item.date}${item.referenceSellSatang == null ? '' : ' · ราคาอ้างอิง ${money(item.referenceSellSatang!)}'}${item.note.isEmpty ? '' : ' · ${item.note}'}',
                   ),
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
@@ -239,46 +245,80 @@ class _GoldScreenState extends State<GoldScreen> {
 }
 
 class _GoldDialog extends StatefulWidget {
-  const _GoldDialog({required this.uid, required this.store, this.existing});
+  const _GoldDialog({
+    required this.uid,
+    required this.store,
+    required this.currentPrice,
+    this.existing,
+  });
   final String uid;
   final BudgetStore store;
   final GoldPurchase? existing;
+  final GoldPrice? currentPrice;
+
   @override
   State<_GoldDialog> createState() => _GoldDialogState();
 }
 
 class _GoldDialogState extends State<_GoldDialog> {
-  late final weight = TextEditingController(
-    text: widget.existing == null
-        ? ''
-        : (widget.existing!.weightUnits / 10000).toString(),
-  );
   late final cost = TextEditingController(
     text: widget.existing == null
         ? ''
         : (widget.existing!.costSatang / 100).toStringAsFixed(2),
   );
+  late final grams = TextEditingController(
+    text: widget.existing == null
+        ? ''
+        : formatGrams(widget.existing!.gramsUnits),
+  );
   late final note = TextEditingController(text: widget.existing?.note ?? '');
+  late bool manualGrams = widget.existing != null;
   String? error;
   bool busy = false;
+
+  int? get referenceSellSatang => widget.existing == null
+      ? widget.currentPrice?.sellSatang
+      : widget.existing!.referenceSellSatang;
+  String get referenceDate => widget.existing == null
+      ? widget.currentPrice?.updateDate ?? ''
+      : widget.existing!.referenceDate;
+  String get referenceTime => widget.existing == null
+      ? widget.currentPrice?.updateTime ?? ''
+      : widget.existing!.referenceTime;
+
   @override
   void dispose() {
-    weight.dispose();
     cost.dispose();
+    grams.dispose();
     note.dispose();
     super.dispose();
   }
 
-  Future<void> _save() async {
-    final units = parseWeightUnits(weight.text);
-    final satang = parseSatang(cost.text);
-    if (units == null || satang == null || note.text.length > 120) {
-      setState(() => error = 'ตรวจสอบน้ำหนัก ราคา และหมายเหตุ');
-      return;
+  void _recalculate() {
+    final amount = parseSatang(cost.text);
+    final reference = referenceSellSatang;
+    setState(() {
+      manualGrams = false;
+      error = null;
+      grams.text = amount == null || reference == null
+          ? ''
+          : formatGrams(gramsForAmount(amount, reference));
+    });
+  }
+
+  void _costChanged(String _) {
+    if (!manualGrams && referenceSellSatang != null) {
+      _recalculate();
+    } else {
+      setState(() => error = null);
     }
-    final available = await widget.store.cash(widget.uid).first;
-    if (satang > available + (widget.existing?.costSatang ?? 0)) {
-      setState(() => error = 'ยอดออมสดไม่พอ');
+  }
+
+  Future<void> _save() async {
+    final amount = parseSatang(cost.text);
+    final weight = parseGramUnits(grams.text);
+    if (amount == null || weight == null || note.text.length > 120) {
+      setState(() => error = 'กรอกยอดจ่ายและน้ำหนักทองให้ถูกต้อง');
       return;
     }
     setState(() {
@@ -286,22 +326,33 @@ class _GoldDialogState extends State<_GoldDialog> {
       error = null;
     });
     try {
+      final available = await widget.store.cash(widget.uid).first;
+      if (amount > available + (widget.existing?.costSatang ?? 0)) {
+        throw StateError('ยอดออมสดไม่พอ กรุณาโอนเข้าออมก่อน');
+      }
       await widget.store.saveGold(
         widget.uid,
         GoldPurchase(
           id: widget.existing?.id ?? '',
-          weightUnits: units,
-          costSatang: satang,
+          gramsUnits: weight,
+          costSatang: amount,
           date:
               widget.existing?.date ??
               DateFormat('yyyy-MM-dd').format(DateTime.now()),
           note: note.text,
+          referenceSellSatang: referenceSellSatang,
+          referenceDate: referenceDate,
+          referenceTime: referenceTime,
         ),
       );
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) {
-        setState(() => error = e is StateError ? e.message : 'บันทึกไม่สำเร็จ');
+        setState(
+          () => error = e is StateError
+              ? e.message
+              : 'บันทึกไม่สำเร็จ กรุณาลองอีกครั้ง',
+        );
       }
     } finally {
       if (mounted) setState(() => busy = false);
@@ -309,49 +360,141 @@ class _GoldDialogState extends State<_GoldDialog> {
   }
 
   @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: Text(
-      widget.existing == null ? 'บันทึกซื้อทอง' : 'แก้ไขรายการซื้อทอง',
-    ),
-    content: SizedBox(
-      width: 380,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          TextField(
-            controller: weight,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: const InputDecoration(
-              labelText: 'น้ำหนัก (บาททองคำ สูงสุด 4 ตำแหน่ง)',
-            ),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: cost,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: const InputDecoration(
-              labelText: 'ราคาที่จ่ายจริง (บาท)',
-            ),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: note,
-            maxLength: 120,
-            decoration: const InputDecoration(
-              labelText: 'หมายเหตุ (ไม่บังคับ)',
-            ),
-          ),
-          if (error != null)
-            Text(error!, style: const TextStyle(color: Colors.red)),
-        ],
+  Widget build(BuildContext context) {
+    final reference = referenceSellSatang;
+    final weight = parseGramUnits(grams.text);
+    return AlertDialog(
+      title: Text(
+        widget.existing == null ? 'จดทองที่ซื้อ' : 'แก้ไขรายการซื้อทอง',
       ),
-    ),
-    actions: [
-      TextButton(
-        onPressed: busy ? null : () => Navigator.pop(context),
-        child: const Text('ยกเลิก'),
+      content: SizedBox(
+        width: 470,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('กรอกยอดที่จ่ายจริง แล้วตรวจน้ำหนักทองก่อนบันทึก'),
+              const SizedBox(height: 16),
+              StreamBuilder<int>(
+                stream: widget.store.cash(widget.uid),
+                builder: (context, snapshot) => Text(
+                  'เงินออมสดคงเหลือ ${money(snapshot.data ?? 0)}',
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: cost,
+                autofocus: true,
+                onChanged: _costChanged,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                decoration: const InputDecoration(
+                  labelText: 'ยอดจ่ายจริงทั้งหมด (บาท)',
+                  prefixIcon: Icon(Icons.payments_outlined),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 4,
+                children: [
+                  for (final amount in [100, 500, 1000, 2000])
+                    ActionChip(
+                      label: Text(NumberFormat('#,##0').format(amount)),
+                      onPressed: busy
+                          ? null
+                          : () {
+                              cost.text = amount.toString();
+                              _costChanged(cost.text);
+                            },
+                    ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFF7E6),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFFE7CD8D)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      reference == null
+                          ? 'ไม่มีราคาอ้างอิง'
+                          : 'ราคาขายออกที่ใช้อ้างอิง ${money(reference)} / บาททองคำ',
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    if (reference != null)
+                      Text('อัปเดต $referenceDate $referenceTime'),
+                    Text(
+                      reference == null
+                          ? 'API ใช้ไม่ได้ กรอกน้ำหนักจริงจากใบเสร็จได้'
+                          : 'คำนวณเบื้องต้นจาก 1 บาททองคำ = 15.244 กรัม',
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: grams,
+                onChanged: (_) => setState(() {
+                  manualGrams = true;
+                  error = null;
+                }),
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                decoration: const InputDecoration(
+                  labelText: 'น้ำหนักทองจริง (กรัม สูงสุด 4 ตำแหน่ง)',
+                  helperText: 'แก้ตามน้ำหนักบนใบเสร็จได้',
+                  prefixIcon: Icon(Icons.scale_outlined),
+                ),
+              ),
+              if (weight != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(
+                    'ประมาณ ${NumberFormat('0.####').format(weight / gramUnitsPerBahtGold)} บาททองคำ'
+                    '${manualGrams ? ' · น้ำหนักที่ยืนยันเอง' : ' · คำนวณจากราคาอ้างอิง'}',
+                  ),
+                ),
+              if (widget.existing != null && reference != null)
+                TextButton.icon(
+                  onPressed: busy ? null : _recalculate,
+                  icon: const Icon(Icons.calculate_outlined),
+                  label: const Text('คำนวณน้ำหนักใหม่จากราคาอ้างอิงเดิม'),
+                ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: note,
+                maxLength: 120,
+                decoration: const InputDecoration(
+                  labelText: 'หมายเหตุ (ไม่บังคับ)',
+                ),
+              ),
+              if (error != null)
+                Text(error!, style: const TextStyle(color: Colors.red)),
+            ],
+          ),
+        ),
       ),
-      FilledButton(onPressed: busy ? null : _save, child: const Text('บันทึก')),
-    ],
-  );
+      actions: [
+        TextButton(
+          onPressed: busy ? null : () => Navigator.pop(context),
+          child: const Text('ยกเลิก'),
+        ),
+        FilledButton(
+          onPressed: busy ? null : _save,
+          child: const Text('บันทึกทอง'),
+        ),
+      ],
+    );
+  }
 }

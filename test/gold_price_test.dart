@@ -17,12 +17,15 @@ void main() {
     });
     expect(price.buySatang, 6200000);
     expect(price.sellSatang, 6220000);
-    expect(price.estimateSatang(1), 620);
-    expect(price.estimateSatang(12345), 7653900);
+    expect(price.estimateSatang(1), 41);
+    expect(price.estimateSatang(gramUnitsPerBahtGold), 6200000);
+    expect(gramsForAmount(1000000, price.sellSatang), 24508);
+    expect(formatGrams(24508), '2.4508');
   });
   test('weight has four decimal places', () {
-    expect(parseWeightUnits('0.0001'), 1);
-    expect(parseWeightUnits('1.23456'), isNull);
+    expect(parseGramUnits('0.0001'), 1);
+    expect(parseGramUnits('1.23456'), isNull);
+    expect(legacyWeightToGramUnits(10000), 152440);
   });
   test('cash rolls across months and rejects edits that overspend', () {
     var cash = nextCashBalance(0, newSavings: 100000);
