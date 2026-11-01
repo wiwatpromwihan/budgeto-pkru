@@ -2,7 +2,7 @@ import 'package:budgeto/budget.dart';
 import 'package:budgeto/gold_price.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:web/web.dart' as web;
 
 class GoldScreen extends StatefulWidget {
   const GoldScreen({super.key, required this.uid, required this.store});
@@ -185,10 +185,8 @@ class _GoldScreenState extends State<GoldScreen> {
                           child: Text(error == null ? 'รีเฟรชราคา' : 'ลองใหม่'),
                         ),
                         TextButton(
-                          onPressed: () => launchUrl(
-                            Uri.parse(
-                              'https://github.com/max180643/thai-gold-api',
-                            ),
+                          onPressed: () => web.window.location.assign(
+                            'https://github.com/max180643/thai-gold-api',
                           ),
                           child: const Text('แหล่งข้อมูล Thai Gold API'),
                         ),
