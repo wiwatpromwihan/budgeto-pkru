@@ -5,7 +5,6 @@ import 'package:budgeto/gold_history.dart';
 import 'package:budgeto/gold_price.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'package:web/web.dart' as web;
 
 class GoldPortfolio extends StatelessWidget {
   const GoldPortfolio({
@@ -19,6 +18,7 @@ class GoldPortfolio extends StatelessWidget {
     required this.days,
     required this.onDaysChanged,
     required this.onRetry,
+    required this.onOpenSource,
   });
 
   final List<GoldPurchase> purchases;
@@ -30,6 +30,7 @@ class GoldPortfolio extends StatelessWidget {
   final int days;
   final ValueChanged<int> onDaysChanged;
   final VoidCallback onRetry;
+  final VoidCallback onOpenSource;
 
   @override
   Widget build(BuildContext context) {
@@ -189,6 +190,35 @@ class GoldPortfolio extends StatelessWidget {
                       ),
                     ),
                   )
+                else if (points.length == 1)
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(18),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF3F6F8),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'ยังไม่มีแนวโน้มให้ดู',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 17,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          'มีข้อมูลพอร์ตเพียงวันเดียว (${points.single.isLatest ? 'ล่าสุด' : _shortDate(points.single.date)}) เมื่อมีราคาในวันถัดไปจึงจะแสดงกราฟเปรียบเทียบได้',
+                        ),
+                        const SizedBox(height: 10),
+                        Text(
+                          'มูลค่าขายคืน ${money(points.single.valueSatang)} · ต้นทุน ${money(points.single.costSatang)}',
+                        ),
+                      ],
+                    ),
+                  )
                 else ...[
                   SizedBox(
                     height: 220,
@@ -216,9 +246,7 @@ class GoldPortfolio extends StatelessWidget {
                   style: TextStyle(fontSize: 12),
                 ),
                 TextButton(
-                  onPressed: () => web.window.location.assign(
-                    'https://xn--42cg1c5bwc1ab.live/chart',
-                  ),
+                  onPressed: onOpenSource,
                   child: const Text('แหล่งข้อมูลราคาย้อนหลัง: ราคาทอง.live'),
                 ),
               ],

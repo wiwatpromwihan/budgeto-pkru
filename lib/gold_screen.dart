@@ -161,6 +161,9 @@ class _GoldScreenState extends State<GoldScreen> {
               days: days,
               onDaysChanged: (value) => setState(() => days = value),
               onRetry: _loadHistory,
+              onOpenSource: () => web.window.location.assign(
+                'https://xn--42cg1c5bwc1ab.live/chart',
+              ),
             ),
             const SizedBox(height: 12),
             Card(
