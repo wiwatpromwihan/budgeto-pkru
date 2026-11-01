@@ -164,7 +164,20 @@ int nextCashBalance(
   return balance;
 }
 
-class BudgetStore {
+class GoldView {
+  const GoldView({required this.cashSatang, required this.purchases});
+  final int cashSatang;
+  final List<GoldPurchase> purchases;
+}
+
+abstract class GoldRepository {
+  Future<GoldView> loadGoldView(String uid);
+  Stream<int> cash(String uid);
+  Future<void> saveGold(String uid, GoldPurchase purchase);
+  Future<void> deleteGold(String uid, String id);
+}
+
+class BudgetStore implements GoldRepository {
   final StreamController<String> _refresh =
       StreamController<String>.broadcast();
   final FirebaseFirestore _db = FirebaseFirestore.instanceFor(
@@ -190,6 +203,7 @@ class BudgetStore {
 
   void _changed(String key) => _refresh.add(key);
 
+  @override
   Stream<int> cash(String uid) {
     final ref = _cash(uid);
     int parse(DocumentSnapshot<Map<String, dynamic>> doc) =>
@@ -213,6 +227,22 @@ class BudgetStore {
       ref.snapshots().map(parse),
       _changes('gold:$uid'),
       () async => parse(await ref.get(const GetOptions(source: Source.server))),
+    );
+  }
+
+  @override
+  Future<GoldView> loadGoldView(String uid) async {
+    final cashDoc = await _cash(
+      uid,
+    ).get(const GetOptions(source: Source.server));
+    final goldDocs = await _gold(
+      uid,
+    ).get(const GetOptions(source: Source.server));
+    final purchases = goldDocs.docs.map(GoldPurchase.fromDoc).toList()
+      ..sort((a, b) => b.date.compareTo(a.date));
+    return GoldView(
+      cashSatang: (cashDoc.data()?['cashSatang'] as int?) ?? 0,
+      purchases: purchases,
     );
   }
 
@@ -327,6 +357,7 @@ class BudgetStore {
     _changed('cash:$uid');
   }
 
+  @override
   Future<void> saveGold(String uid, GoldPurchase purchase) async {
     if (purchase.gramsUnits <= 0 ||
         purchase.costSatang <= 0 ||
@@ -356,6 +387,7 @@ class BudgetStore {
     _changed('cash:$uid');
   }
 
+  @override
   Future<void> deleteGold(String uid, String id) async {
     final ref = _gold(uid).doc(id);
     await _db.runTransaction((tx) async {

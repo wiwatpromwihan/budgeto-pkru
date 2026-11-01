@@ -2,14 +2,22 @@ import 'package:budgeto/budget.dart';
 import 'package:budgeto/gold_price.dart';
 import 'package:budgeto/gold_history.dart';
 import 'package:budgeto/gold_portfolio.dart';
+import 'package:budgeto/external_links.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'package:web/web.dart' as web;
 
 class GoldScreen extends StatefulWidget {
-  const GoldScreen({super.key, required this.uid, required this.store});
+  const GoldScreen({
+    super.key,
+    required this.uid,
+    required this.store,
+    this.priceApi,
+    this.historyApi,
+  });
   final String uid;
-  final BudgetStore store;
+  final GoldRepository store;
+  final GoldPriceApi? priceApi;
+  final GoldHistoryApi? historyApi;
   @override
   State<GoldScreen> createState() => _GoldScreenState();
 }
@@ -17,10 +25,9 @@ class GoldScreen extends StatefulWidget {
 class _GoldScreenState extends State<GoldScreen> {
   static final GoldPriceApi _sharedApi = GoldPriceApi();
   static final GoldHistoryApi _sharedHistoryApi = GoldHistoryApi();
-  final api = _sharedApi;
-  final historyApi = _sharedHistoryApi;
-  late Stream<int> _cashStream;
-  late Stream<List<GoldPurchase>> _goldStream;
+  late GoldPriceApi api;
+  late GoldHistoryApi historyApi;
+  late Future<GoldView> _goldView;
   GoldPrice? price;
   List<DailyGoldPrice>? history;
   bool historyLoading = false;
@@ -31,7 +38,9 @@ class _GoldScreenState extends State<GoldScreen> {
   @override
   void initState() {
     super.initState();
-    _bindStreams();
+    api = widget.priceApi ?? _sharedApi;
+    historyApi = widget.historyApi ?? _sharedHistoryApi;
+    _goldView = widget.store.loadGoldView(widget.uid);
     _load();
     _loadHistory();
   }
@@ -40,13 +49,16 @@ class _GoldScreenState extends State<GoldScreen> {
   void didUpdateWidget(covariant GoldScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.store != widget.store || oldWidget.uid != widget.uid) {
-      _bindStreams();
+      _goldView = widget.store.loadGoldView(widget.uid);
     }
   }
 
-  void _bindStreams() {
-    _cashStream = widget.store.cash(widget.uid);
-    _goldStream = widget.store.goldPurchases(widget.uid);
+  void _reloadGoldView() {
+    if (mounted) {
+      setState(() {
+        _goldView = widget.store.loadGoldView(widget.uid);
+      });
+    }
   }
 
   Future<void> _loadHistory() async {
@@ -96,7 +108,7 @@ class _GoldScreenState extends State<GoldScreen> {
   Future<void> _edit([GoldPurchase? purchase]) async {
     if (purchase == null && !api.isFresh) await _load();
     if (!mounted) return;
-    await showDialog<void>(
+    final changed = await showDialog<bool>(
       context: context,
       builder: (_) => _GoldDialog(
         uid: widget.uid,
@@ -105,6 +117,7 @@ class _GoldScreenState extends State<GoldScreen> {
         currentPrice: price,
       ),
     );
+    if (changed == true) _reloadGoldView();
   }
 
   Future<void> _delete(GoldPurchase purchase) async {
@@ -127,6 +140,7 @@ class _GoldScreenState extends State<GoldScreen> {
     if (yes != true) return;
     try {
       await widget.store.deleteGold(widget.uid, purchase.id);
+      _reloadGoldView();
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(
@@ -137,144 +151,148 @@ class _GoldScreenState extends State<GoldScreen> {
   }
 
   @override
-  Widget build(BuildContext context) => StreamBuilder<int>(
-    stream: _cashStream,
-    builder: (context, cashSnapshot) => StreamBuilder<List<GoldPurchase>>(
-      stream: _goldStream,
-      builder: (context, snapshot) {
-        if (snapshot.hasError || cashSnapshot.hasError) {
-          return const Center(child: Text('โหลดข้อมูลออมทองไม่สำเร็จ'));
-        }
-        if (!snapshot.hasData || !cashSnapshot.hasData) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        final purchases = snapshot.data!;
-        return ListView(
-          children: [
-            Row(
-              children: [
-                const Expanded(
-                  child: Text(
-                    'ออมทอง',
-                    style: TextStyle(fontSize: 30, fontWeight: FontWeight.bold),
+  Widget build(BuildContext context) => FutureBuilder<GoldView>(
+    future: _goldView,
+    builder: (context, snapshot) {
+      if (snapshot.hasError) {
+        return Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('โหลดข้อมูลออมทองไม่สำเร็จ'),
+              TextButton(
+                onPressed: _reloadGoldView,
+                child: const Text('ลองใหม่'),
+              ),
+            ],
+          ),
+        );
+      }
+      if (!snapshot.hasData) {
+        return const Center(child: CircularProgressIndicator());
+      }
+      final purchases = snapshot.data!.purchases;
+      return ListView(
+        children: [
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'ออมทอง',
+                  style: TextStyle(fontSize: 30, fontWeight: FontWeight.bold),
+                ),
+              ),
+              FilledButton.icon(
+                onPressed: () => _edit(),
+                icon: const Icon(Icons.add),
+                label: const Text('จดทองที่ซื้อ'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'บันทึกทองคำแท่ง 96.5% ที่ซื้อจากภายนอก แอปไม่มีการซื้อขายหรือชำระเงินจริง',
+          ),
+          const SizedBox(height: 18),
+          GoldPortfolio(
+            purchases: purchases,
+            cash: snapshot.data!.cashSatang,
+            price: price,
+            history: history,
+            historyError: historyError,
+            historyLoading: historyLoading,
+            range: range,
+            onRangeChanged: (value) {
+              if (range == value) return;
+              setState(() => range = value);
+              _loadHistory();
+            },
+            onRetry: _loadHistory,
+            onOpenSource: () =>
+                openExternal('https://xn--42cg1c5bwc1ab.live/chart'),
+          ),
+          const SizedBox(height: 12),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'ราคาทองคำแท่ง 96.5%',
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                   ),
-                ),
-                FilledButton.icon(
-                  onPressed: () => _edit(),
-                  icon: const Icon(Icons.add),
-                  label: const Text('จดทองที่ซื้อ'),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'บันทึกทองคำแท่ง 96.5% ที่ซื้อจากภายนอก แอปไม่มีการซื้อขายหรือชำระเงินจริง',
-            ),
-            const SizedBox(height: 18),
-            GoldPortfolio(
-              purchases: purchases,
-              cash: cashSnapshot.data!,
-              price: price,
-              history: history,
-              historyError: historyError,
-              historyLoading: historyLoading,
-              range: range,
-              onRangeChanged: (value) {
-                if (range == value) return;
-                setState(() => range = value);
-                _loadHistory();
-              },
-              onRetry: _loadHistory,
-              onOpenSource: () => web.window.location.assign(
-                'https://xn--42cg1c5bwc1ab.live/chart',
+                  if (loading) const LinearProgressIndicator(),
+                  if (error != null) Text(error!),
+                  if (price != null) ...[
+                    Text(
+                      'ราคาขายออก (อ้างอิงตอนซื้อ)  ${money(price!.sellSatang)}',
+                    ),
+                    Text(
+                      'ราคารับซื้อ (ประเมินขายคืน)  ${money(price!.buySatang)}',
+                    ),
+                    Text('อัปเดต ${price!.updateDate} ${price!.updateTime}'),
+                  ],
+                  Row(
+                    children: [
+                      TextButton(
+                        onPressed: loading ? null : _load,
+                        child: Text(error == null ? 'รีเฟรชราคา' : 'ลองใหม่'),
+                      ),
+                      TextButton(
+                        onPressed: () => openExternal(
+                          'https://github.com/max180643/thai-gold-api',
+                        ),
+                        child: const Text('แหล่งข้อมูล Thai Gold API'),
+                      ),
+                    ],
+                  ),
+                  const Text(
+                    'ราคาเป็นข้อมูลอ้างอิง กำไร/ขาดทุนเป็นเพียงประมาณการ ไม่รับประกันผลตอบแทน',
+                  ),
+                ],
               ),
             ),
-            const SizedBox(height: 12),
+          ),
+          const SizedBox(height: 18),
+          const Text(
+            'รายการซื้อทอง',
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+          ),
+          if (purchases.isEmpty)
+            const Padding(
+              padding: EdgeInsets.all(20),
+              child: Text('ยังไม่มีรายการซื้อทอง'),
+            ),
+          for (final item in purchases)
             Card(
-              child: Padding(
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+              child: ListTile(
+                title: Text(
+                  '${formatGrams(item.gramsUnits)} กรัม · ${money(item.costSatang)}',
+                ),
+                subtitle: Text(
+                  '${item.date}${item.referenceSellSatang == null ? '' : ' · ราคาอ้างอิง ${money(item.referenceSellSatang!)}'}${item.note.isEmpty ? '' : ' · ${item.note}'}',
+                ),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Text(
-                      'ราคาทองคำแท่ง 96.5%',
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                      ),
+                    IconButton(
+                      onPressed: () => _edit(item),
+                      icon: const Icon(Icons.edit_outlined),
+                      tooltip: 'แก้ไข',
                     ),
-                    if (loading) const LinearProgressIndicator(),
-                    if (error != null) Text(error!),
-                    if (price != null) ...[
-                      Text(
-                        'ราคาขายออก (อ้างอิงตอนซื้อ)  ${money(price!.sellSatang)}',
-                      ),
-                      Text(
-                        'ราคารับซื้อ (ประเมินขายคืน)  ${money(price!.buySatang)}',
-                      ),
-                      Text('อัปเดต ${price!.updateDate} ${price!.updateTime}'),
-                    ],
-                    Row(
-                      children: [
-                        TextButton(
-                          onPressed: loading ? null : _load,
-                          child: Text(error == null ? 'รีเฟรชราคา' : 'ลองใหม่'),
-                        ),
-                        TextButton(
-                          onPressed: () => web.window.location.assign(
-                            'https://github.com/max180643/thai-gold-api',
-                          ),
-                          child: const Text('แหล่งข้อมูล Thai Gold API'),
-                        ),
-                      ],
-                    ),
-                    const Text(
-                      'ราคาเป็นข้อมูลอ้างอิง กำไร/ขาดทุนเป็นเพียงประมาณการ ไม่รับประกันผลตอบแทน',
+                    IconButton(
+                      onPressed: () => _delete(item),
+                      icon: const Icon(Icons.delete_outline),
+                      tooltip: 'ลบ',
                     ),
                   ],
                 ),
               ),
             ),
-            const SizedBox(height: 18),
-            const Text(
-              'รายการซื้อทอง',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-            ),
-            if (purchases.isEmpty)
-              const Padding(
-                padding: EdgeInsets.all(20),
-                child: Text('ยังไม่มีรายการซื้อทอง'),
-              ),
-            for (final item in purchases)
-              Card(
-                child: ListTile(
-                  title: Text(
-                    '${formatGrams(item.gramsUnits)} กรัม · ${money(item.costSatang)}',
-                  ),
-                  subtitle: Text(
-                    '${item.date}${item.referenceSellSatang == null ? '' : ' · ราคาอ้างอิง ${money(item.referenceSellSatang!)}'}${item.note.isEmpty ? '' : ' · ${item.note}'}',
-                  ),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        onPressed: () => _edit(item),
-                        icon: const Icon(Icons.edit_outlined),
-                        tooltip: 'แก้ไข',
-                      ),
-                      IconButton(
-                        onPressed: () => _delete(item),
-                        icon: const Icon(Icons.delete_outline),
-                        tooltip: 'ลบ',
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-          ],
-        );
-      },
-    ),
+        ],
+      );
+    },
   );
 }
 
@@ -286,7 +304,7 @@ class _GoldDialog extends StatefulWidget {
     this.existing,
   });
   final String uid;
-  final BudgetStore store;
+  final GoldRepository store;
   final GoldPurchase? existing;
   final GoldPrice? currentPrice;
 
@@ -379,7 +397,7 @@ class _GoldDialogState extends State<_GoldDialog> {
           referenceTime: referenceTime,
         ),
       );
-      if (mounted) Navigator.pop(context);
+      if (mounted) Navigator.pop(context, true);
     } catch (e) {
       if (mounted) {
         setState(
