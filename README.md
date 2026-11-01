@@ -1,6 +1,8 @@
 # แบ่งดี
 
-แอป Flutter Web สำหรับแบ่งรายรับรายเดือนเป็นงบ 3 หมวด: จำเป็น ใช้จ่าย และออม พร้อมแท็บออมทอง ได้แรงบันดาลใจจาก [Budgeto](https://github.com/tejasbadone/budgeto) และพัฒนาเป็นโปรเจกต์ใหม่สำหรับเดโมบน localhost
+แอป Flutter Web สำหรับแบ่งรายรับรายเดือนเป็นงบ 3 หมวด: จำเป็น ใช้จ่าย และออม พร้อมแท็บออมทอง ได้แรงบันดาลใจจาก [Budgeto](https://github.com/tejasbadone/budgeto) และพัฒนาเป็นโปรเจกต์ใหม่สำหรับเดโม
+
+**เปิดแอป:** [https://budgeto-pkru-20261031.web.app](https://budgeto-pkru-20261031.web.app)
 
 แท็บออมทองใช้ [Thai Gold API](https://github.com/max180643/thai-gold-api) แสดงราคาทองคำแท่ง 96.5% เป็นข้อมูลอ้างอิง บันทึกเฉพาะทองที่ซื้อจากภายนอก โดยหักต้นทุนจากเงินออมสดสะสมข้ามเดือน ไม่ใช่การซื้อขายหรือชำระเงินจริง มูลค่าขายคืนและกำไร/ขาดทุนเป็นประมาณการเท่านั้น
 
@@ -27,6 +29,13 @@ flutter run -d chrome --web-hostname localhost --web-port 8085
 ```
 
 เปิด `http://localhost:8085` แล้วสมัครบัญชีหรือเข้าสู่ระบบ บัญชี Firebase ปัจจุบันคือ `budgeto-pkru-20261031` และใช้ฐานข้อมูล Firestore ชื่อ `budgeto` ใน `asia-southeast1`.
+
+หากต้องการเผยแพร่เว็บจากโค้ดล่าสุด:
+
+```bash
+flutter build web
+firebase deploy --only hosting --project budgeto-pkru-20261031
+```
 
 การนำไปใช้กับ Firebase โปรเจกต์ของตนเอง: สร้างเว็บแอปใน Firebase, เปิด Email/Password และ Google ใน Authentication, เพิ่ม `localhost` ใน Authorized domains, สร้าง Firestore Enterprise Native Mode ชื่อ `budgeto`, เปลี่ยนค่าใน `lib/firebase_options.dart` และ `.firebaserc`, แล้ว deploy `firestore.rules` ด้วย Firebase CLI การตั้งค่า Firebase สำหรับเว็บเป็นตัวระบุโปรเจกต์สาธารณะ ไม่ใช่รหัสผ่าน; ความปลอดภัยของข้อมูลขึ้นกับ Authentication และ Security Rules
 
