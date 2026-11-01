@@ -1,5 +1,7 @@
 import 'package:budgeto/budget.dart';
 import 'package:budgeto/gold_price.dart';
+import 'package:budgeto/gold_history.dart';
+import 'package:budgeto/gold_portfolio.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:web/web.dart' as web;
@@ -14,14 +16,41 @@ class GoldScreen extends StatefulWidget {
 
 class _GoldScreenState extends State<GoldScreen> {
   static final GoldPriceApi _sharedApi = GoldPriceApi();
+  static final GoldHistoryApi _sharedHistoryApi = GoldHistoryApi();
   final api = _sharedApi;
+  final historyApi = _sharedHistoryApi;
   GoldPrice? price;
+  List<DailyGoldPrice>? history;
+  bool historyLoading = false;
+  bool historyError = false;
+  int days = 30;
   bool loading = false;
   String? error;
   @override
   void initState() {
     super.initState();
     _load();
+    _loadHistory();
+  }
+
+  Future<void> _loadHistory() async {
+    setState(() {
+      historyLoading = true;
+      historyError = false;
+    });
+    try {
+      final value = await historyApi.history();
+      if (mounted) setState(() => history = value);
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          historyError = true;
+          history = null;
+        });
+      }
+    } finally {
+      if (mounted) setState(() => historyLoading = false);
+    }
   }
 
   Future<void> _load() async {
@@ -100,9 +129,6 @@ class _GoldScreenState extends State<GoldScreen> {
           return const Center(child: CircularProgressIndicator());
         }
         final purchases = snapshot.data!;
-        final grams = purchases.fold<int>(0, (sum, e) => sum + e.gramsUnits);
-        final cost = purchases.fold<int>(0, (sum, e) => sum + e.costSatang);
-        final estimate = price?.estimateSatang(grams);
         return ListView(
           children: [
             Row(
@@ -125,33 +151,16 @@ class _GoldScreenState extends State<GoldScreen> {
               'บันทึกทองคำแท่ง 96.5% ที่ซื้อจากภายนอก แอปไม่มีการซื้อขายหรือชำระเงินจริง',
             ),
             const SizedBox(height: 18),
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'เงินออมสดคงเหลือ  ${money(cashSnapshot.data!)}',
-                      style: const TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'น้ำหนักทองที่ถือ  ${formatGrams(grams)} กรัม (${NumberFormat('0.####').format(grams / gramUnitsPerBahtGold)} บาททองคำ)',
-                    ),
-                    Text('ต้นทุนจริง  ${money(cost)}'),
-                    if (estimate != null) ...[
-                      Text('มูลค่าขายคืนโดยประมาณ  ${money(estimate)}'),
-                      Text(
-                        'กำไร/ขาดทุนที่ยังไม่เกิดขึ้นจริง  ${money(estimate - cost)}',
-                      ),
-                    ],
-                  ],
-                ),
-              ),
+            GoldPortfolio(
+              purchases: purchases,
+              cash: cashSnapshot.data!,
+              price: price,
+              history: history,
+              historyError: historyError,
+              historyLoading: historyLoading,
+              days: days,
+              onDaysChanged: (value) => setState(() => days = value),
+              onRetry: _loadHistory,
             ),
             const SizedBox(height: 12),
             Card(
