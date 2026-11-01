@@ -1,11 +1,11 @@
 {
-    "name": "Budgeto PKRU",
-    "short_name": "Budgeto",
+    "name": "แบ่งดี",
+    "short_name": "แบ่งดี",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#F3F6F8",
     "theme_color": "#087F77",
-    "description": "จัดรายรับ รายจ่าย และเงินออมรายเดือน",
+    "description": "แบ่งงบ ออมทอง",
     "prefer_related_applications": false,
     "icons": [
         {

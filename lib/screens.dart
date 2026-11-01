@@ -1,4 +1,5 @@
 import 'package:budgeto/budget.dart';
+import 'package:budgeto/gold_screen.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -103,7 +104,7 @@ class _AuthScreenState extends State<AuthScreen> {
               ),
               const SizedBox(height: 16),
               const Text(
-                'Budgeto',
+                'แบ่งดี',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   fontSize: 38,
@@ -113,7 +114,7 @@ class _AuthScreenState extends State<AuthScreen> {
               ),
               const SizedBox(height: 6),
               const Text(
-                'จัดเงินให้เห็นภาพในทุกเดือน',
+                'แบ่งงบ ออมทอง',
                 textAlign: TextAlign.center,
                 style: TextStyle(color: _muted, fontSize: 16),
               ),
@@ -216,6 +217,7 @@ class DashboardScreen extends StatefulWidget {
 
 class _DashboardScreenState extends State<DashboardScreen> {
   DateTime _month = DateTime(DateTime.now().year, DateTime.now().month);
+  bool _goldTab = false;
 
   void _changeMonth(int offset) =>
       setState(() => _month = DateTime(_month.year, _month.month + offset));
@@ -310,7 +312,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       ),
                       const SizedBox(width: 10),
                       const Text(
-                        'Budgeto',
+                        'แบ่งดี',
                         style: TextStyle(
                           fontSize: 25,
                           fontWeight: FontWeight.w800,
@@ -349,272 +351,304 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 },
               ),
               const SizedBox(height: 24),
+              Row(
+                children: [
+                  TextButton.icon(
+                    onPressed: () => setState(() => _goldTab = false),
+                    icon: const Icon(Icons.pie_chart_outline),
+                    label: const Text('แบ่งงบ'),
+                  ),
+                  const SizedBox(width: 12),
+                  TextButton.icon(
+                    onPressed: () => setState(() => _goldTab = true),
+                    icon: const Icon(Icons.savings_outlined),
+                    label: const Text('ออมทอง'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
               Expanded(
-                child: StreamBuilder<BudgetSplit>(
-                  key: ValueKey('split-${monthKey(_month)}'),
-                  stream: widget.store.split(widget.user.uid, _month),
-                  builder: (context, splitSnapshot) => StreamBuilder<List<BudgetEntry>>(
-                    key: ValueKey('entries-${monthKey(_month)}'),
-                    stream: widget.store.entries(widget.user.uid, _month),
-                    builder: (context, entrySnapshot) {
-                      if (splitSnapshot.hasError || entrySnapshot.hasError) {
-                        return const Center(
-                          child: Text(
-                            'โหลดข้อมูลไม่สำเร็จ กรุณาตรวจสอบการเชื่อมต่อและสิทธิ์ Firebase',
-                          ),
-                        );
-                      }
-                      if (!splitSnapshot.hasData || !entrySnapshot.hasData) {
-                        return const Center(child: CircularProgressIndicator());
-                      }
-                      final split = splitSnapshot.data!;
-                      final entries = entrySnapshot.data!;
-                      final totals = BudgetTotals.fromEntries(entries);
-                      return ListView(
-                        children: [
-                          LayoutBuilder(
-                            builder: (context, box) {
-                              final heading = Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const Text(
-                                    'ภาพรวมการเงิน',
-                                    style: TextStyle(
-                                      fontSize: 30,
-                                      fontWeight: FontWeight.w800,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    'รายรับและการใช้เงินของเดือน $_monthName',
-                                    style: const TextStyle(color: _muted),
-                                  ),
-                                ],
+                child: _goldTab
+                    ? GoldScreen(uid: widget.user.uid, store: widget.store)
+                    : StreamBuilder<BudgetSplit>(
+                        key: ValueKey('split-${monthKey(_month)}'),
+                        stream: widget.store.split(widget.user.uid, _month),
+                        builder: (context, splitSnapshot) => StreamBuilder<List<BudgetEntry>>(
+                          key: ValueKey('entries-${monthKey(_month)}'),
+                          stream: widget.store.entries(widget.user.uid, _month),
+                          builder: (context, entrySnapshot) {
+                            if (splitSnapshot.hasError ||
+                                entrySnapshot.hasError) {
+                              return const Center(
+                                child: Text(
+                                  'โหลดข้อมูลไม่สำเร็จ กรุณาตรวจสอบการเชื่อมต่อและสิทธิ์ Firebase',
+                                ),
                               );
-                              final controls = Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  IconButton(
-                                    onPressed: () => _changeMonth(-1),
-                                    tooltip: 'เดือนก่อน',
-                                    icon: const Icon(Icons.chevron_left),
-                                  ),
-                                  Text(
-                                    _monthName,
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                  IconButton(
-                                    onPressed: () => _changeMonth(1),
-                                    tooltip: 'เดือนถัดไป',
-                                    icon: const Icon(Icons.chevron_right),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  FilledButton.icon(
-                                    onPressed: () => _entry(),
-                                    icon: const Icon(Icons.add),
-                                    label: const Text('เพิ่มรายการ'),
-                                  ),
-                                ],
+                            }
+                            if (!splitSnapshot.hasData ||
+                                !entrySnapshot.hasData) {
+                              return const Center(
+                                child: CircularProgressIndicator(),
                               );
-                              if (box.maxWidth < 760) {
-                                return Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    heading,
-                                    const SizedBox(height: 12),
-                                    controls,
-                                  ],
-                                );
-                              }
-                              return Row(
-                                children: [heading, const Spacer(), controls],
-                              );
-                            },
-                          ),
-                          const SizedBox(height: 22),
-                          _IncomeCard(total: totals.income),
-                          const SizedBox(height: 18),
-                          Row(
-                            children: [
-                              const Text(
-                                'งบตามสัดส่วน',
-                                style: TextStyle(
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              const Spacer(),
-                              TextButton.icon(
-                                onPressed: () => _split(split),
-                                icon: const Icon(Icons.tune, size: 18),
-                                label: const Text('ปรับสัดส่วน'),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 10),
-                          LayoutBuilder(
-                            builder: (context, constraints) {
-                              final narrow = constraints.maxWidth < 760;
-                              final cards = [
-                                _BucketCard(
-                                  kind: EntryKind.needs,
-                                  percent: split.needs,
-                                  allocated: totals.allocation(
-                                    split,
-                                    EntryKind.needs,
-                                  ),
-                                  actual: totals.needs,
-                                ),
-                                _BucketCard(
-                                  kind: EntryKind.wants,
-                                  percent: split.wants,
-                                  allocated: totals.allocation(
-                                    split,
-                                    EntryKind.wants,
-                                  ),
-                                  actual: totals.wants,
-                                ),
-                                _BucketCard(
-                                  kind: EntryKind.savings,
-                                  percent: split.savings,
-                                  allocated: totals.allocation(
-                                    split,
-                                    EntryKind.savings,
-                                  ),
-                                  actual: totals.savings,
-                                ),
-                              ];
-                              return narrow
-                                  ? Column(
+                            }
+                            final split = splitSnapshot.data!;
+                            final entries = entrySnapshot.data!;
+                            final totals = BudgetTotals.fromEntries(entries);
+                            return ListView(
+                              children: [
+                                LayoutBuilder(
+                                  builder: (context, box) {
+                                    final heading = Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
                                       children: [
-                                        for (final card in cards)
-                                          Padding(
-                                            padding: const EdgeInsets.only(
-                                              bottom: 12,
-                                            ),
-                                            child: card,
+                                        const Text(
+                                          'ภาพรวมการเงิน',
+                                          style: TextStyle(
+                                            fontSize: 30,
+                                            fontWeight: FontWeight.w800,
                                           ),
-                                      ],
-                                    )
-                                  : Row(
-                                      children: [
-                                        for (final card in cards)
-                                          Expanded(
-                                            child: Padding(
-                                              padding: const EdgeInsets.only(
-                                                right: 12,
-                                              ),
-                                              child: card,
-                                            ),
-                                          ),
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          'รายรับและการใช้เงินของเดือน $_monthName',
+                                          style: const TextStyle(color: _muted),
+                                        ),
                                       ],
                                     );
-                            },
-                          ),
-                          const SizedBox(height: 24),
-                          const Text(
-                            'รายการในเดือนนี้',
-                            style: TextStyle(
-                              fontSize: 20,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-                          if (entries.isEmpty)
-                            Card(
-                              elevation: 0,
-                              child: Padding(
-                                padding: const EdgeInsets.all(28),
-                                child: Column(
+                                    final controls = Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        IconButton(
+                                          onPressed: () => _changeMonth(-1),
+                                          tooltip: 'เดือนก่อน',
+                                          icon: const Icon(Icons.chevron_left),
+                                        ),
+                                        Text(
+                                          _monthName,
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                        IconButton(
+                                          onPressed: () => _changeMonth(1),
+                                          tooltip: 'เดือนถัดไป',
+                                          icon: const Icon(Icons.chevron_right),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        FilledButton.icon(
+                                          onPressed: () => _entry(),
+                                          icon: const Icon(Icons.add),
+                                          label: const Text('เพิ่มรายการ'),
+                                        ),
+                                      ],
+                                    );
+                                    if (box.maxWidth < 760) {
+                                      return Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          heading,
+                                          const SizedBox(height: 12),
+                                          controls,
+                                        ],
+                                      );
+                                    }
+                                    return Row(
+                                      children: [
+                                        heading,
+                                        const Spacer(),
+                                        controls,
+                                      ],
+                                    );
+                                  },
+                                ),
+                                const SizedBox(height: 22),
+                                _IncomeCard(total: totals.income),
+                                const SizedBox(height: 18),
+                                Row(
                                   children: [
                                     const Text(
-                                      'ยังไม่มีรายการในเดือนนี้',
+                                      'งบตามสัดส่วน',
                                       style: TextStyle(
+                                        fontSize: 20,
                                         fontWeight: FontWeight.bold,
                                       ),
                                     ),
-                                    const SizedBox(height: 6),
-                                    const Text(
-                                      'เริ่มจากเพิ่มรายรับ แล้วบันทึกรายจ่ายหรือเงินออม',
-                                      style: TextStyle(color: _muted),
-                                    ),
-                                    const SizedBox(height: 12),
+                                    const Spacer(),
                                     TextButton.icon(
-                                      onPressed: () => _entry(),
-                                      icon: const Icon(Icons.add),
-                                      label: const Text('เพิ่มรายการ'),
+                                      onPressed: () => _split(split),
+                                      icon: const Icon(Icons.tune, size: 18),
+                                      label: const Text('ปรับสัดส่วน'),
                                     ),
                                   ],
                                 ),
-                              ),
-                            )
-                          else
-                            Card(
-                              elevation: 0,
-                              child: Column(
-                                children: [
-                                  for (final entry in entries)
-                                    ListTile(
-                                      leading: CircleAvatar(
-                                        backgroundColor:
-                                            entry.kind == EntryKind.income
-                                            ? const Color(0xFFE0F4EA)
-                                            : const Color(0xFFE8F1F3),
-                                        child: Icon(
-                                          entry.kind == EntryKind.income
-                                              ? Icons.south_west
-                                              : Icons.north_east,
-                                          color: _teal,
-                                          size: 18,
+                                const SizedBox(height: 10),
+                                LayoutBuilder(
+                                  builder: (context, constraints) {
+                                    final narrow = constraints.maxWidth < 760;
+                                    final cards = [
+                                      _BucketCard(
+                                        kind: EntryKind.needs,
+                                        percent: split.needs,
+                                        allocated: totals.allocation(
+                                          split,
+                                          EntryKind.needs,
                                         ),
+                                        actual: totals.needs,
                                       ),
-                                      title: Text(
-                                        entry.note.isEmpty
-                                            ? entry.kind.label
-                                            : entry.note,
+                                      _BucketCard(
+                                        kind: EntryKind.wants,
+                                        percent: split.wants,
+                                        allocated: totals.allocation(
+                                          split,
+                                          EntryKind.wants,
+                                        ),
+                                        actual: totals.wants,
                                       ),
-                                      subtitle: Text(
-                                        '${entry.kind.label} · ${DateFormat('d MMM yyyy', 'th_TH').format(entry.date)}',
+                                      _BucketCard(
+                                        kind: EntryKind.savings,
+                                        percent: split.savings,
+                                        allocated: totals.allocation(
+                                          split,
+                                          EntryKind.savings,
+                                        ),
+                                        actual: totals.savings,
                                       ),
-                                      trailing: Row(
-                                        mainAxisSize: MainAxisSize.min,
+                                    ];
+                                    return narrow
+                                        ? Column(
+                                            children: [
+                                              for (final card in cards)
+                                                Padding(
+                                                  padding:
+                                                      const EdgeInsets.only(
+                                                        bottom: 12,
+                                                      ),
+                                                  child: card,
+                                                ),
+                                            ],
+                                          )
+                                        : Row(
+                                            children: [
+                                              for (final card in cards)
+                                                Expanded(
+                                                  child: Padding(
+                                                    padding:
+                                                        const EdgeInsets.only(
+                                                          right: 12,
+                                                        ),
+                                                    child: card,
+                                                  ),
+                                                ),
+                                            ],
+                                          );
+                                  },
+                                ),
+                                const SizedBox(height: 24),
+                                const Text(
+                                  'รายการในเดือนนี้',
+                                  style: TextStyle(
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                const SizedBox(height: 10),
+                                if (entries.isEmpty)
+                                  Card(
+                                    elevation: 0,
+                                    child: Padding(
+                                      padding: const EdgeInsets.all(28),
+                                      child: Column(
                                         children: [
-                                          Text(
-                                            '${entry.kind == EntryKind.income ? '+' : '-'}${money(entry.amountSatang)}',
-                                            style: const TextStyle(
+                                          const Text(
+                                            'ยังไม่มีรายการในเดือนนี้',
+                                            style: TextStyle(
                                               fontWeight: FontWeight.bold,
                                             ),
                                           ),
-                                          IconButton(
-                                            onPressed: () => _entry(entry),
-                                            tooltip: 'แก้ไข',
-                                            icon: const Icon(
-                                              Icons.edit_outlined,
-                                              size: 19,
-                                            ),
+                                          const SizedBox(height: 6),
+                                          const Text(
+                                            'เริ่มจากเพิ่มรายรับ แล้วบันทึกรายจ่ายหรือเงินออม',
+                                            style: TextStyle(color: _muted),
                                           ),
-                                          IconButton(
-                                            onPressed: () => _delete(entry),
-                                            tooltip: 'ลบ',
-                                            icon: const Icon(
-                                              Icons.delete_outline,
-                                              size: 19,
-                                            ),
+                                          const SizedBox(height: 12),
+                                          TextButton.icon(
+                                            onPressed: () => _entry(),
+                                            icon: const Icon(Icons.add),
+                                            label: const Text('เพิ่มรายการ'),
                                           ),
                                         ],
                                       ),
                                     ),
-                                ],
-                              ),
-                            ),
-                          const SizedBox(height: 20),
-                        ],
-                      );
-                    },
-                  ),
-                ),
+                                  )
+                                else
+                                  Card(
+                                    elevation: 0,
+                                    child: Column(
+                                      children: [
+                                        for (final entry in entries)
+                                          ListTile(
+                                            leading: CircleAvatar(
+                                              backgroundColor:
+                                                  entry.kind == EntryKind.income
+                                                  ? const Color(0xFFE0F4EA)
+                                                  : const Color(0xFFE8F1F3),
+                                              child: Icon(
+                                                entry.kind == EntryKind.income
+                                                    ? Icons.south_west
+                                                    : Icons.north_east,
+                                                color: _teal,
+                                                size: 18,
+                                              ),
+                                            ),
+                                            title: Text(
+                                              entry.note.isEmpty
+                                                  ? entry.kind.label
+                                                  : entry.note,
+                                            ),
+                                            subtitle: Text(
+                                              '${entry.kind.label} · ${DateFormat('d MMM yyyy', 'th_TH').format(entry.date)}',
+                                            ),
+                                            trailing: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                Text(
+                                                  '${entry.kind == EntryKind.income ? '+' : '-'}${money(entry.amountSatang)}',
+                                                  style: const TextStyle(
+                                                    fontWeight: FontWeight.bold,
+                                                  ),
+                                                ),
+                                                IconButton(
+                                                  onPressed: () =>
+                                                      _entry(entry),
+                                                  tooltip: 'แก้ไข',
+                                                  icon: const Icon(
+                                                    Icons.edit_outlined,
+                                                    size: 19,
+                                                  ),
+                                                ),
+                                                IconButton(
+                                                  onPressed: () =>
+                                                      _delete(entry),
+                                                  tooltip: 'ลบ',
+                                                  icon: const Icon(
+                                                    Icons.delete_outline,
+                                                    size: 19,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                      ],
+                                    ),
+                                  ),
+                                const SizedBox(height: 20),
+                              ],
+                            );
+                          },
+                        ),
+                      ),
               ),
             ],
           ),

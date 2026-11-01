@@ -149,6 +149,18 @@ int? parseSatang(String value) {
   return result > 0 ? result : null;
 }
 
+int nextCashBalance(
+  int current, {
+  int oldSavings = 0,
+  int newSavings = 0,
+  int oldGoldCost = 0,
+  int newGoldCost = 0,
+}) {
+  final balance = current - oldSavings + newSavings + oldGoldCost - newGoldCost;
+  if (balance < 0) throw StateError('ยอดออมสดไม่พอ');
+  return balance;
+}
+
 class BudgetStore {
   final FirebaseFirestore _db = FirebaseFirestore.instanceFor(
     app: Firebase.app(),
@@ -161,6 +173,46 @@ class BudgetStore {
           .doc(uid)
           .collection('months')
           .doc(monthKey(month));
+
+  DocumentReference<Map<String, dynamic>> _cash(String uid) =>
+      _db.collection('users').doc(uid).collection('finance').doc('savings');
+
+  CollectionReference<Map<String, dynamic>> _gold(String uid) =>
+      _db.collection('users').doc(uid).collection('goldPurchases');
+
+  Stream<int> cash(String uid) => _cash(
+    uid,
+  ).snapshots().map((doc) => (doc.data()?['cashSatang'] as int?) ?? 0);
+
+  Stream<List<GoldPurchase>> goldPurchases(String uid) =>
+      _gold(uid).snapshots().map((snapshot) {
+        final result = snapshot.docs.map(GoldPurchase.fromDoc).toList();
+        result.sort((a, b) => b.date.compareTo(a.date));
+        return result;
+      });
+
+  Future<void> ensureCash(String uid) async {
+    if ((await _cash(uid).get()).exists) return;
+    // Existing month documents are read before initializing older accounts.
+    final months = await _db
+        .collection('users')
+        .doc(uid)
+        .collection('months')
+        .get();
+    var total = 0;
+    for (final month in months.docs) {
+      final entries = await month.reference.collection('entries').get();
+      for (final entry in entries.docs) {
+        if (entry.data()['kind'] == 'savings') {
+          total += entry.data()['amountSatang'] as int;
+        }
+      }
+    }
+    await _db.runTransaction((tx) async {
+      final current = await tx.get(_cash(uid));
+      if (!current.exists) tx.set(_cash(uid), {'cashSatang': total});
+    });
+  }
 
   Stream<BudgetSplit> split(String uid, DateTime month) =>
       _month(uid, month).snapshots().map(BudgetSplit.fromDoc);
@@ -184,16 +236,139 @@ class BudgetStore {
     if (entry.amountSatang <= 0 || monthKey(entry.date) != monthKey(month)) {
       throw ArgumentError('ข้อมูลรายการไม่ถูกต้อง');
     }
-    final collection = _month(uid, month).collection('entries');
-    if (entry.id.isEmpty) {
-      await collection.add(entry.toMap());
-    } else {
-      await collection.doc(entry.id).set(entry.toMap());
-    }
+    await ensureCash(uid);
+    final monthRef = _month(uid, month);
+    final ref = entry.id.isEmpty
+        ? monthRef.collection('entries').doc()
+        : monthRef.collection('entries').doc(entry.id);
+    await _db.runTransaction((tx) async {
+      final monthDoc = await tx.get(monthRef);
+      final old = await tx.get(ref);
+      final cashDoc = await tx.get(_cash(uid));
+      final oldSavings = old.exists && old.data()?['kind'] == 'savings'
+          ? old.data()!['amountSatang'] as int
+          : 0;
+      final newSavings = entry.kind == EntryKind.savings
+          ? entry.amountSatang
+          : 0;
+      final balance = nextCashBalance(
+        cashDoc.data()?['cashSatang'] as int? ?? 0,
+        oldSavings: oldSavings,
+        newSavings: newSavings,
+      );
+      if (!monthDoc.exists) tx.set(monthRef, BudgetSplit.initial.toMap());
+      tx.set(ref, entry.toMap());
+      if (oldSavings != newSavings) tx.set(_cash(uid), {'cashSatang': balance});
+    });
   }
 
-  Future<void> deleteEntry(String uid, DateTime month, String id) =>
-      _month(uid, month).collection('entries').doc(id).delete();
+  Future<void> deleteEntry(String uid, DateTime month, String id) async {
+    await ensureCash(uid);
+    final ref = _month(uid, month).collection('entries').doc(id);
+    await _db.runTransaction((tx) async {
+      final old = await tx.get(ref);
+      final cashDoc = await tx.get(_cash(uid));
+      if (!old.exists) return;
+      final savings = old.data()?['kind'] == 'savings'
+          ? old.data()!['amountSatang'] as int
+          : 0;
+      final balance = nextCashBalance(
+        cashDoc.data()?['cashSatang'] as int? ?? 0,
+        oldSavings: savings,
+      );
+      tx.delete(ref);
+      if (savings > 0) tx.set(_cash(uid), {'cashSatang': balance});
+    });
+  }
+
+  Future<void> saveGold(String uid, GoldPurchase purchase) async {
+    if (purchase.weightUnits <= 0 ||
+        purchase.costSatang <= 0 ||
+        purchase.note.length > 120) {
+      throw ArgumentError('ข้อมูลทองไม่ถูกต้อง');
+    }
+    await ensureCash(uid);
+    final ref = purchase.id.isEmpty
+        ? _gold(uid).doc()
+        : _gold(uid).doc(purchase.id);
+    await _db.runTransaction((tx) async {
+      final old = await tx.get(ref);
+      final cashDoc = await tx.get(_cash(uid));
+      final oldCost = old.data()?['costSatang'] as int? ?? 0;
+      final balance = nextCashBalance(
+        cashDoc.data()?['cashSatang'] as int? ?? 0,
+        oldGoldCost: oldCost,
+        newGoldCost: purchase.costSatang,
+      );
+      if (old.exists && old.data()?['date'] != purchase.date) {
+        throw ArgumentError('แก้ไขวันที่ซื้อไม่ได้');
+      }
+      tx.set(ref, purchase.toMap());
+      tx.set(_cash(uid), {'cashSatang': balance});
+    });
+  }
+
+  Future<void> deleteGold(String uid, String id) async {
+    final ref = _gold(uid).doc(id);
+    await _db.runTransaction((tx) async {
+      final old = await tx.get(ref);
+      final cashDoc = await tx.get(_cash(uid));
+      if (!old.exists) return;
+      tx.delete(ref);
+      tx.set(_cash(uid), {
+        'cashSatang': nextCashBalance(
+          cashDoc.data()?['cashSatang'] as int? ?? 0,
+          oldGoldCost: old.data()!['costSatang'] as int,
+        ),
+      });
+    });
+  }
+}
+
+class GoldPurchase {
+  const GoldPurchase({
+    required this.id,
+    required this.weightUnits,
+    required this.costSatang,
+    required this.date,
+    required this.note,
+  });
+  final String id;
+  final int weightUnits;
+  final int costSatang;
+  final String date;
+  final String note;
+
+  factory GoldPurchase.fromDoc(
+    QueryDocumentSnapshot<Map<String, dynamic>> doc,
+  ) {
+    final data = doc.data();
+    return GoldPurchase(
+      id: doc.id,
+      weightUnits: data['weightUnits'] as int,
+      costSatang: data['costSatang'] as int,
+      date: data['date'] as String,
+      note: data['note'] as String,
+    );
+  }
+  Map<String, dynamic> toMap() => {
+    'weightUnits': weightUnits,
+    'costSatang': costSatang,
+    'date': date,
+    'note': note.trim(),
+  };
+}
+
+int? parseWeightUnits(String input) {
+  final value = input.trim();
+  if (!RegExp(r'^\d+(\.\d{1,4})?$').hasMatch(value)) return null;
+  final parts = value.split('.');
+  final whole = int.tryParse(parts[0]);
+  if (whole == null || whole > 1000000) return null;
+  final units =
+      whole * 10000 +
+      (parts.length == 2 ? int.parse(parts[1].padRight(4, '0')) : 0);
+  return units > 0 ? units : null;
 }
 
 Future<void> signInWithGoogle() async {

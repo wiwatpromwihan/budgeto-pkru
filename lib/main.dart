@@ -22,7 +22,7 @@ class BudgetoApp extends StatelessWidget {
   Widget build(BuildContext context) {
     const ink = Color(0xFF15263A);
     return MaterialApp(
-      title: 'Budgeto PKRU',
+      title: 'แบ่งดี — แบ่งงบ ออมทอง',
       debugShowCheckedModeBanner: false,
       locale: const Locale('th', 'TH'),
       supportedLocales: const [Locale('th', 'TH')],

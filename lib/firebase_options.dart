@@ -4,7 +4,7 @@ import 'package:flutter/foundation.dart';
 class DefaultFirebaseOptions {
   static FirebaseOptions get currentPlatform {
     if (!kIsWeb) {
-      throw UnsupportedError('Budgeto เวอร์ชันนี้รองรับเว็บเท่านั้น');
+      throw UnsupportedError('แบ่งดีเวอร์ชันนี้รองรับเว็บเท่านั้น');
     }
     return const FirebaseOptions(
       apiKey: 'AIzaSyAi7vR3F0_Y2lDY6LnjHHAYne4xLuXQub0',

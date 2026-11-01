@@ -5,7 +5,9 @@ service cloud.firestore {
     // savings as integer percentages. Its entries/{id} documents have exactly
     // kind (income|needs|wants|savings), amountSatang (positive integer),
     // date (YYYY-MM-DD within parent month), and note (string up to 120 chars).
-    // No user profile document or public data exists.
+    // users/{uid}/finance/savings stores cashSatang (nonnegative integer).
+    // users/{uid}/goldPurchases/{id} stores weightUnits (1/10000 baht gold),
+    // costSatang, date (YYYY-MM-DD), and note (up to 120 characters).
     function isAuthenticated() { return request.auth != null; }
     function isOwner(uid) { return isAuthenticated() && request.auth.uid == uid; }
     function uidUnchanged(uid) { return request.auth.uid == uid; }
@@ -29,8 +31,35 @@ service cloud.firestore {
         && data.date.matches('^' + monthId + '-(0[1-9]|[12][0-9]|3[01])$')
         && data.note is string && data.note.size() <= 120;
     }
+    function isValidCash(data) {
+      return data.keys().hasAll(['cashSatang'])
+        && data.keys().hasOnly(['cashSatang'])
+        && data.cashSatang is int && data.cashSatang >= 0
+        && data.cashSatang <= 1000000000000;
+    }
+    function isValidGold(data) {
+      return data.keys().hasAll(['weightUnits', 'costSatang', 'date', 'note'])
+        && data.keys().hasOnly(['weightUnits', 'costSatang', 'date', 'note'])
+        && data.weightUnits is int && data.weightUnits > 0 && data.weightUnits <= 10000000000
+        && data.costSatang is int && data.costSatang > 0 && data.costSatang <= 100000000000
+        && data.date is string && data.date.matches('^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$')
+        && data.note is string && data.note.size() <= 120;
+    }
+    match /users/{uid}/finance/{docId} {
+      allow get, list: if isOwner(uid) && docId == 'savings';
+      allow create, update: if isOwner(uid) && docId == 'savings' && isValidCash(request.resource.data);
+      allow delete: if false;
+    }
+    match /users/{uid}/goldPurchases/{purchaseId} {
+      allow get, list: if isOwner(uid);
+      allow create: if isOwner(uid) && isValidGold(request.resource.data);
+      allow update: if isOwner(uid) && isValidGold(request.resource.data)
+        && request.resource.data.date == resource.data.date;
+      allow delete: if isOwner(uid);
+    }
     match /users/{uid}/months/{monthId} {
-      allow get, list: if isOwner(uid) && validMonthId(monthId);
+      allow get: if isOwner(uid) && validMonthId(monthId);
+      allow list: if isOwner(uid);
       allow create: if isOwner(uid) && uidUnchanged(uid) && validMonthId(monthId) && isValidMonth(request.resource.data);
       allow update: if isOwner(uid) && uidNotModified(uid) && validMonthId(monthId) && isValidMonth(request.resource.data);
       allow delete: if false;
