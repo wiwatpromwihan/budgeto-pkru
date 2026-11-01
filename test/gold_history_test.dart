@@ -1,93 +1,39 @@
-import 'package:budgeto/budget.dart';
 import 'package:budgeto/gold_history.dart';
-import 'package:budgeto/gold_price.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 
 void main() {
-  test('parses historical buy-back prices in satang', () {
+  test('parses Thai gold sell close and buy-back separately', () {
     final rows = parseGoldHistory('''{"data":[
-      {"date":"2026-10-30","buy":62000.50},
-      {"date":"2026-10-31","buy":62100.00}
+      {"date":"2026-10-31","buy":62000.00,"close":62200.50},
+      {"date":"2026-10-30","buy":62100.00,"close":62300.00}
     ]}''');
-    expect(rows.map((e) => e.buySatang), [6200050, 6210000]);
+    expect(rows.map((e) => e.date), ['2026-10-30', '2026-10-31']);
+    expect(rows.last.buySatang, 6200000);
+    expect(rows.last.sellSatang, 6220050);
   });
 
-  test(
-    'portfolio uses actual holdings on each priced day and latest quote',
-    () {
-      final purchases = [
-        const GoldPurchase(
-          id: 'a',
-          gramsUnits: 152440,
-          costSatang: 6000000,
-          date: '2026-10-29',
-          note: '',
-        ),
-        const GoldPurchase(
-          id: 'b',
-          gramsUnits: 152440,
-          costSatang: 6100000,
-          date: '2026-10-31',
-          note: '',
-        ),
-      ];
-      final points = portfolioHistory(
-        history: const [
-          DailyGoldPrice('2026-10-30', 6200000),
-          DailyGoldPrice('2026-11-01', 6200000),
-        ],
-        purchases: purchases,
-        days: 7,
-        now: DateTime(2026, 11, 1),
-        latest: const GoldPrice(
-          buySatang: 6300000,
-          sellSatang: 6320000,
-          updateDate: '1/11/2569',
-          updateTime: '10:00',
-        ),
-      );
-      expect(points.length, 2); // Missing October 31 is not filled in.
-      expect(points.first.valueSatang, 6200000);
-      expect(points.first.costSatang, 6000000);
-      expect(points.last.valueSatang, 12600000);
-      expect(points.last.costSatang, 12100000);
-      expect(points.last.isLatest, isTrue);
-    },
-  );
-
-  test('editing an old purchase recomputes historic cost and weight', () {
-    final original = [
-      const GoldPurchase(
-        id: 'a',
-        gramsUnits: 152440,
-        costSatang: 6000000,
-        date: '2026-10-30',
-        note: '',
-      ),
-    ];
-    final edited = [
-      const GoldPurchase(
-        id: 'a',
-        gramsUnits: 304880,
-        costSatang: 12000000,
-        date: '2026-10-30',
-        note: '',
-      ),
-    ];
-    const history = [DailyGoldPrice('2026-10-31', 6200000)];
-    final before = portfolioHistory(
-      history: history,
-      purchases: original,
-      days: 7,
-      now: DateTime(2026, 11, 1),
+  test('requests daily year and monthly five-year series', () async {
+    final uris = <Uri>[];
+    final api = GoldHistoryApi(
+      clock: () => DateTime(2026, 11, 1),
+      client: MockClient((request) async {
+        uris.add(request.url);
+        return http.Response(
+          '{"data":[{"date":"2026-11-01","buy":62050,"close":62250}]}',
+          200,
+        );
+      }),
     );
-    final after = portfolioHistory(
-      history: history,
-      purchases: edited,
-      days: 7,
-      now: DateTime(2026, 11, 1),
-    );
-    expect(after.single.valueSatang, before.single.valueSatang * 2);
-    expect(after.single.costSatang, before.single.costSatang * 2);
+    await api.history(GoldChartRange.year);
+    await api.history(GoldChartRange.fiveYears);
+    expect(uris[0].queryParameters['from'], '2025-11-01');
+    expect(uris[0].queryParameters['interval'], 'day');
+    expect(uris[1].queryParameters['from'], '2021-11-01');
+    expect(uris[1].queryParameters['interval'], 'month');
+    await api.history(GoldChartRange.year);
+    expect(uris.length, 2); // Cached by range.
+    api.close();
   });
 }

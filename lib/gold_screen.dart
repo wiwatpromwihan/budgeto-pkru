@@ -23,7 +23,7 @@ class _GoldScreenState extends State<GoldScreen> {
   List<DailyGoldPrice>? history;
   bool historyLoading = false;
   bool historyError = false;
-  int days = 30;
+  GoldChartRange range = GoldChartRange.year;
   bool loading = false;
   String? error;
   @override
@@ -34,22 +34,26 @@ class _GoldScreenState extends State<GoldScreen> {
   }
 
   Future<void> _loadHistory() async {
+    final requestedRange = range;
     setState(() {
       historyLoading = true;
       historyError = false;
+      history = null;
     });
     try {
-      final value = await historyApi.history();
-      if (mounted) setState(() => history = value);
+      final value = await historyApi.history(requestedRange);
+      if (mounted && range == requestedRange) setState(() => history = value);
     } catch (_) {
-      if (mounted) {
+      if (mounted && range == requestedRange) {
         setState(() {
           historyError = true;
           history = null;
         });
       }
     } finally {
-      if (mounted) setState(() => historyLoading = false);
+      if (mounted && range == requestedRange) {
+        setState(() => historyLoading = false);
+      }
     }
   }
 
@@ -158,8 +162,12 @@ class _GoldScreenState extends State<GoldScreen> {
               history: history,
               historyError: historyError,
               historyLoading: historyLoading,
-              days: days,
-              onDaysChanged: (value) => setState(() => days = value),
+              range: range,
+              onRangeChanged: (value) {
+                if (range == value) return;
+                setState(() => range = value);
+                _loadHistory();
+              },
               onRetry: _loadHistory,
               onOpenSource: () => web.window.location.assign(
                 'https://xn--42cg1c5bwc1ab.live/chart',

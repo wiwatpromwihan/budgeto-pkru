@@ -1,27 +1,40 @@
 import 'dart:convert';
 
-import 'package:budgeto/budget.dart';
-import 'package:budgeto/gold_price.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 
-class DailyGoldPrice {
-  const DailyGoldPrice(this.date, this.buySatang);
-  final String date;
-  final int buySatang;
+enum GoldChartRange {
+  week('7D'),
+  month('1M'),
+  threeMonths('3M'),
+  sixMonths('6M'),
+  year('1Y'),
+  fiveYears('5Y'),
+  tenYears('10Y'),
+  all('MAX');
+
+  const GoldChartRange(this.label);
+  final String label;
+
+  bool get monthly => index >= GoldChartRange.fiveYears.index;
+
+  DateTime start(DateTime now) => switch (this) {
+    GoldChartRange.week => now.subtract(const Duration(days: 6)),
+    GoldChartRange.month => DateTime(now.year, now.month - 1, now.day),
+    GoldChartRange.threeMonths => DateTime(now.year, now.month - 3, now.day),
+    GoldChartRange.sixMonths => DateTime(now.year, now.month - 6, now.day),
+    GoldChartRange.year => DateTime(now.year - 1, now.month, now.day),
+    GoldChartRange.fiveYears => DateTime(now.year - 5, now.month, now.day),
+    GoldChartRange.tenYears => DateTime(now.year - 10, now.month, now.day),
+    GoldChartRange.all => DateTime(2007, 1, 3),
+  };
 }
 
-class GoldPortfolioPoint {
-  const GoldPortfolioPoint(
-    this.date,
-    this.valueSatang,
-    this.costSatang, {
-    this.isLatest = false,
-  });
+class DailyGoldPrice {
+  const DailyGoldPrice(this.date, this.buySatang, {this.sellSatang = 0});
   final String date;
-  final int valueSatang;
-  final int costSatang;
-  final bool isLatest;
+  final int buySatang;
+  final int sellSatang;
 }
 
 List<DailyGoldPrice> parseGoldHistory(String body) {
@@ -32,80 +45,51 @@ List<DailyGoldPrice> parseGoldHistory(String body) {
     final row = raw as Map<String, dynamic>;
     final date = row['date'] as String;
     final buy = row['buy'] as num;
+    final sell = row['close'] as num;
     if (!RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(date) ||
         DateTime.tryParse(date) == null ||
-        buy <= 0) {
+        buy <= 0 ||
+        sell <= 0) {
       throw const FormatException('Invalid gold history');
     }
-    result.add(DailyGoldPrice(date, (buy * 100).round()));
+    result.add(
+      DailyGoldPrice(
+        date,
+        (buy * 100).round(),
+        sellSatang: (sell * 100).round(),
+      ),
+    );
   }
   result.sort((a, b) => a.date.compareTo(b.date));
   return result;
 }
 
-List<GoldPortfolioPoint> portfolioHistory({
-  required List<DailyGoldPrice> history,
-  required List<GoldPurchase> purchases,
-  required int days,
-  required DateTime now,
-  GoldPrice? latest,
-}) {
-  final today = DateFormat('yyyy-MM-dd').format(now);
-  final from = DateFormat(
-    'yyyy-MM-dd',
-  ).format(now.subtract(Duration(days: days - 1)));
-  final prices = <String, DailyGoldPrice>{
-    for (final row in history)
-      if (row.date.compareTo(from) >= 0 && row.date.compareTo(today) <= 0)
-        row.date: row,
-  };
-  if (latest != null) prices[today] = DailyGoldPrice(today, latest.buySatang);
-  return prices.values
-      .map((row) {
-        var grams = 0;
-        var cost = 0;
-        for (final purchase in purchases) {
-          if (purchase.date.compareTo(row.date) <= 0) {
-            grams += purchase.gramsUnits;
-            cost += purchase.costSatang;
-          }
-        }
-        final value =
-            (grams * row.buySatang + gramUnitsPerBahtGold ~/ 2) ~/
-            gramUnitsPerBahtGold;
-        return GoldPortfolioPoint(
-          row.date,
-          value,
-          cost,
-          isLatest: latest != null && row.date == today,
-        );
-      })
-      .where((point) => point.costSatang > 0)
-      .toList()
-    ..sort((a, b) => a.date.compareTo(b.date));
-}
-
 class GoldHistoryApi {
-  GoldHistoryApi({http.Client? client}) : _client = client ?? http.Client();
+  GoldHistoryApi({http.Client? client, DateTime Function()? clock})
+    : _client = client ?? http.Client(),
+      _clock = clock ?? DateTime.now;
   final http.Client _client;
-  List<DailyGoldPrice>? _cached;
-  DateTime? _fetchedAt;
+  final DateTime Function() _clock;
+  final Map<GoldChartRange, List<DailyGoldPrice>> _cache = {};
+  final Map<GoldChartRange, DateTime> _fetchedAt = {};
 
-  Future<List<DailyGoldPrice>> history({bool force = false}) async {
+  Future<List<DailyGoldPrice>> history(
+    GoldChartRange range, {
+    bool force = false,
+  }) async {
+    final now = _clock();
+    final cached = _cache[range];
     if (!force &&
-        _cached != null &&
-        _fetchedAt != null &&
-        DateTime.now().difference(_fetchedAt!) < const Duration(minutes: 5)) {
-      return _cached!;
+        cached != null &&
+        _fetchedAt[range] != null &&
+        now.difference(_fetchedAt[range]!) < const Duration(minutes: 5)) {
+      return cached;
     }
-    final now = DateTime.now();
-    final from = DateFormat(
-      'yyyy-MM-dd',
-    ).format(now.subtract(const Duration(days: 89)));
-    final to = DateFormat('yyyy-MM-dd').format(now);
+    final format = DateFormat('yyyy-MM-dd');
     final uri = Uri.https('xn--42cg1c5bwc1ab.live', '/api/v1/history.json', {
-      'from': from,
-      'to': to,
+      'from': format.format(range.start(now)),
+      'to': format.format(now),
+      'interval': range.monthly ? 'month' : 'day',
     });
     final response = await _client
         .get(uri)
@@ -114,8 +98,8 @@ class GoldHistoryApi {
       throw StateError('โหลดประวัติราคาทองไม่สำเร็จ');
     }
     final rows = parseGoldHistory(utf8.decode(response.bodyBytes));
-    _cached = rows;
-    _fetchedAt = now;
+    _cache[range] = rows;
+    _fetchedAt[range] = now;
     return rows;
   }
 
